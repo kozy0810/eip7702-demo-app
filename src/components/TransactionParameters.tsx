@@ -3,6 +3,7 @@ import { Card, Title, Grid, TextInput, Textarea, Group, Text, Badge, Paper, Stac
 import { IconUpload, IconAlertCircle, IconCheck, IconFileCode, IconArrowLeft } from '@tabler/icons-react';
 import { PREDEFINED_CONTRACTS } from '@/constants/predefinedContracts';
 import { AbiItem, MethodInput } from '@/types/abi';
+import { SignAuthorizationReturnType } from 'viem';
 
 interface TransactionParametersProps {
   to: string;
@@ -20,7 +21,7 @@ interface TransactionParametersProps {
     contractAddress: string;
     nonce: string;
     signature: string;
-    privateKey: string;
+    signedAuthorization?: SignAuthorizationReturnType;
   }>;
   onToChange: (value: string) => void;
   onValueChange: (value: string) => void;

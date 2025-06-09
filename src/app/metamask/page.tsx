@@ -3,8 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Container,
-  Text,
-  Group,
   Button,
   Stack,
   Alert,
@@ -17,12 +15,12 @@ import {
   IconAlertCircle,
   IconCheck,
   IconExternalLink,
-  IconLoader,
 } from '@tabler/icons-react';
-import { createWalletClient, custom, encodeFunctionData, SignAuthorizationReturnType } from 'viem';
+import { createWalletClient, custom, encodeFunctionData, SignAuthorizationReturnType, keccak256, concatHex, toRlp, numberToHex } from 'viem';
 import { sepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createPublicClient, http } from 'viem';
+import { verifyAuthorization } from 'viem/utils';
 import { WalletConnection } from '@/components/WalletConnection';
 import { AuthorizationList } from '@/components/AuthorizationList';
 import { TransactionParameters } from '@/components/TransactionParameters';
@@ -67,8 +65,8 @@ interface Authorization {
   contractAddress: string;
   nonce: string;
   signature: string;
-  privateKey: string;
   signedAuthorization?: SignAuthorizationReturnType;
+  privateKey?: string;
 }
 
 interface AuthorizationData {
@@ -92,7 +90,7 @@ interface AbiItem {
   stateMutability?: string;
 }
 
-const Home = () => {
+const MetaMaskPage = () => {
   const router = useRouter();
   const [account, setAccount] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -110,7 +108,6 @@ const Home = () => {
     contractAddress: '0x63c0c19a282a1b52b07dd5a65b58948a07dae32b',
     nonce: '0',
     signature: '',
-    privateKey: '',
   }]);
   const [to, setTo] = useState('');
   const [value, setValue] = useState('0');
@@ -455,42 +452,87 @@ const Home = () => {
       setSuccess('');
 
       const auth = authorizationList[index];
-      if (!auth.privateKey) {
-        throw new Error('Private key is required for signing');
-      }
       if (!auth.contractAddress) {
         throw new Error('Contract address is required for signing');
       }
 
-      const account = privateKeyToAccount(auth.privateKey as `0x${string}`);
+      if (!window.ethereum) {
+        throw new Error('MetaMaskはインストールされていません');
+      }
+
       const currentChain = SUPPORTED_CHAINS.find(chain => chain.id === chainId) || sepolia;
 
-      // 一時的なWalletClientを作成して署名
-      const tempWalletClient = createWalletClient({
-        account,
-        chain: currentChain,
-        transport: http() // Private Keyからの署名なのでHTTPトランスポートを使用
+      const debugWalletClient = createWalletClient({
+        account: privateKeyToAccount("0x92406fb0bc2df3386ea4fc930f2dc6fa2e0e5c83aeae14f0e7cce6506f607621"),
+        chain: sepolia,
+        transport: custom(window.ethereum),
       });
 
-      const authorization = await tempWalletClient.signAuthorization({
-        account,
+      const _authorization = await walletClient?.signAuthorization({
+        account: debugWalletClient.account,
         contractAddress: auth.contractAddress as `0x${string}`,
-        // executor: 'self' を指定しない場合、Authorizationのnonceはトランザクションのnonceと一致する必要がある
-        // ここではAuthorizationのnonceは入力されたもの、トランザクションのnonceはMetaMaskが管理するnonceになる
-        // EOAがRelayerになる場合はexecutor: 'self'が必要。今回はシンプルにRelayerとsignerを分ける構成を想定。
       });
-      console.log("authorization", authorization)
+      console.log("_authorization", _authorization);
+      if (_authorization) {
+        console.log("_isValid", await verifyAuthorization({
+          address: account as `0x${string}`,
+          authorization: _authorization,
+        }));
+      }
+
+      // EIP-7702の署名メッセージを作成:
+      // keccak256(0x05 || rlp([chain_id, address, nonce]))
+      console.log("auth.nonce", auth.nonce)
+      const message = keccak256(
+        concatHex([
+          '0x05',
+          toRlp([
+              numberToHex(currentChain.id),
+              auth.contractAddress as `0x${string}`,
+              numberToHex(Number(auth.nonce))
+          ]),
+        ])
+      );
+      console.log("_authorization message", message);
+
+      // MetaMaskで署名を実行
+      const signature = await window.ethereum.request({
+        method: 'personal_sign',
+        params: [message, account] // 署名メッセージとしてHex文字列を渡す
+      });
+
+      // 署名データを解析
+      const r = `0x${signature.slice(2, 66)}`;
+      const s = `0x${signature.slice(66, 130)}`;
+      const v = parseInt(signature.slice(130, 132), 16);
+
+      const authorization: SignAuthorizationReturnType = {
+        address: auth.contractAddress as `0x${string}`,
+        chainId: currentChain.id,
+        nonce: Number(auth.nonce),
+        r: r as `0x${string}`,
+        s: s as `0x${string}`,
+        yParity: v
+      };
 
       const newList = [...authorizationList];
       newList[index] = {
         ...auth,
-        signature: `${authorization.r}${authorization.s.slice(2)}${(authorization.v || BigInt(0)).toString(16).padStart(2, '0')}`, // authorization.vがundefinedの場合にデフォルト値0を使用
-        signedAuthorization: authorization, // AuthorizationDataオブジェクトをsignedAuthorizationにセット
+        signature: signature,
+        signedAuthorization: authorization,
       };
       setAuthorizationList(newList);
 
       setSuccess('Authorization signed successfully!');
       setTimeout(() => setSuccess(''), 3000);
+
+      const isValid = await verifyAuthorization({
+        address: account as `0x${string}`,
+        authorization: authorization,
+      });
+      console.log("account", account)
+      console.log("authorization", authorization)
+      console.log("isValid", isValid)
 
     } catch (err: unknown) {
       console.error('Signing error:', err);
@@ -509,7 +551,6 @@ const Home = () => {
       contractAddress: '',
       nonce: '0',
       signature: '',
-      privateKey: '',
     }]);
   };
 
@@ -556,22 +597,24 @@ const Home = () => {
 
       const params = {
         account: account as `0x${string}`,
-        to: to as `0x${string}`,
-        value: BigInt(parseEther(value || '0')),
-        data: data as `0x${string}`,
-        gas: estimatedGas,
-        maxFeePerGas: BigInt(parseGwei(maxFeePerGas)),
-        maxPriorityFeePerGas: BigInt(parseGwei(maxPriorityFeePerGas)),
         chain: currentChain,
-        // type: 'eip7702' as const,
-        authorizationList: authorizationList
-          .filter(auth => auth.signedAuthorization) // signedAuthorizationが存在するもののみをフィルタリング
-          .map(auth => auth.signedAuthorization as SignAuthorizationReturnType) // signedAuthorizationオブジェクトをそのまま使用
+        calls: [{
+          to: to as `0x${string}`,
+          value: BigInt(parseEther(value || '0')),
+          data: data as `0x${string}`,
+          gas: estimatedGas,
+          maxFeePerGas: BigInt(parseGwei(maxFeePerGas)),
+          maxPriorityFeePerGas: BigInt(parseGwei(maxPriorityFeePerGas)),
+          type: 'eip7702' as const,
+          authorizationList: authorizationList
+            .filter(auth => auth.signedAuthorization)
+            .map(auth => auth.signedAuthorization as SignAuthorizationReturnType)
+        }]
       };
       console.log("tx params", params)
 
-      const hash = await walletClient.sendTransaction(params);
-      setTxHash(hash);
+      const { id } = await walletClient.sendCalls(params);
+      setTxHash(id);
       setSuccess('Transaction sent successfully!');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: unknown) {
@@ -599,6 +642,10 @@ const Home = () => {
       setError('');
       setSuccess('');
 
+      if (!to || !isValidAddress(to)) {
+        throw new Error('有効な「To」アドレスは、ガス料金の計算に必要です。');
+      }
+
       const currentChain = SUPPORTED_CHAINS.find(chain => chain.id === chainId) || sepolia;
       const publicClient = createPublicClient({
         chain: currentChain,
@@ -608,7 +655,7 @@ const Home = () => {
       // 最新のブロックを取得
       const block = await publicClient.getBlock();
       if (!block) {
-        throw new Error('Failed to get latest block');
+        throw new Error('最新のブロックを取得できませんでした');
       }
 
       // ガス制限の見積もり
@@ -617,218 +664,111 @@ const Home = () => {
         to: to as `0x${string}`,
         value: BigInt(parseEther(value || '0')),
         data: data as `0x${string}`,
+        type: 'eip7702',
       });
-
-      // 見積もったガス制限に余裕を持たせる
-      const gasLimitWithBuffer = estimatedGas * BigInt(12) / BigInt(10); // 20%の余裕
-
-      // 最新のガス代を取得
-      const feeHistory = await publicClient.getFeeHistory({
-        blockCount: 1,
-        rewardPercentiles: [50]
-      });
-
-      const baseFeePerGas = block.baseFeePerGas || BigInt(0);
-      const maxPriorityFeePerGas = feeHistory.reward?.[0]?.[0] || BigInt(1500000000); // 1.5 Gwei
-      const maxFeePerGas = (baseFeePerGas * BigInt(12) / BigInt(10)) + maxPriorityFeePerGas; // 20%の余裕
-
-      // 状態を更新
-      setGasLimit(gasLimitWithBuffer.toString());
-      setMaxFeePerGas((Number(maxFeePerGas) / 1e9).toString());
-      setMaxPriorityFeePerGas((Number(maxPriorityFeePerGas) / 1e9).toString());
+      console.log('estimatedGas', estimatedGas);
 
       setSuccess('Gas fees calculated successfully');
       setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      console.error('Gas calculation error:', err);
+    } catch (err: unknown) {
+      console.error('Gas fees calculation error:', err);
       if (err instanceof Error) {
-        setError(`Failed to calculate gas fees: ${err.message}`);
+        setError(err.message);
       } else {
-        setError('Failed to calculate gas fees');
+        setError('An unknown error occurred');
       }
     } finally {
       setIsCalculatingGas(false);
     }
   };
 
-  const getChainName = (chainId: number) => {
-    const chains: { [key: number]: string } = {
-      1: 'Ethereum Mainnet',
-      11155111: 'Sepolia Testnet',
-      5: 'Goerli Testnet',
-      137: 'Polygon Mainnet',
-      80001: 'Polygon Mumbai'
-    };
-    return chains[chainId] || `Chain ID: ${chainId}`;
-  };
-
-  const getExplorerUrl = (txHash: string, chainId: number) => {
-    const explorers: { [key: number]: string } = {
-      1: 'https://etherscan.io',
-      11155111: 'https://sepolia.etherscan.io',
-      5: 'https://goerli.etherscan.io',
-      137: 'https://polygonscan.com',
-      80001: 'https://mumbai.polygonscan.com'
-    };
-    const baseUrl = explorers[chainId] || 'https://etherscan.io';
-    return `${baseUrl}/tx/${txHash}`;
-  };
-
-  const disconnectWallet = () => {
-    setAccount(null);
-    setIsConnected(false);
-    setChainId(null);
-    setWalletClient(null);
-    setSuccess('Wallet disconnected successfully');
-    setTimeout(() => setSuccess(''), 3000);
+  const getChainName = (id: number): string => {
+    const chain = SUPPORTED_CHAINS.find(c => c.id === id);
+    return chain ? chain.name : `Unknown Chain (ID: ${id})`;
   };
 
   return (
-    <Container size="lg" py="xl">
+    <Container my="md">
+      <Header />
       <Stack gap="xl">
-        <Header />
-
-        {error && (
-          <Alert icon={<IconAlertCircle size={16} />} color="red">
-            {error}
-          </Alert>
-        )}
-
-        {success && (
-          <Alert icon={<IconCheck size={16} />} color="green">
-            {success}
-          </Alert>
-        )}
+        {success && <Alert icon={<IconCheck size={16} />} color="green">{success}</Alert>}
+        {error && <Alert icon={<IconAlertCircle size={16} />} color="red">{error}</Alert>}
 
         <WalletConnection
-          isConnected={isConnected}
           account={account}
-          chainId={chainId}
+          isConnected={isConnected}
           loading={loading}
           onConnect={connectWallet}
-          onDisconnect={disconnectWallet}
+          onDisconnect={() => {
+            setAccount(null);
+            setIsConnected(false);
+            setWalletClient(null);
+            setChainId(null);
+            setSuccess('Wallet disconnected');
+            setTimeout(() => setSuccess(''), 3000);
+          }}
           getChainName={getChainName}
+          chainId={chainId}
         />
 
-        {isConnected && (
-          <>
-            <AuthorizationList
-              authorizationList={authorizationList}
-              onAdd={addAuthorization}
-              onRemove={removeAuthorization}
-              onUpdate={updateAuthorizationList}
-              onSign={handleSignAuthorization}
-              getAddressFromPrivateKey={getAddressFromPrivateKey}
-            />
+        <TransactionParameters
+          to={to}
+          onToChange={setTo}
+          value={value}
+          onValueChange={setValue}
+          data={data}
+          onDataChange={setData}
+          gasLimit={gasLimit}
+          onGasLimitChange={setGasLimit}
+          maxFeePerGas={maxFeePerGas}
+          onMaxFeePerGasChange={setMaxFeePerGas}
+          maxPriorityFeePerGas={maxPriorityFeePerGas}
+          onMaxPriorityFeePerGasChange={setMaxPriorityFeePerGas}
+          abi={abi}
+          selectedMethod={selectedMethod}
+          methodInputs={methodInputs}
+          abiError={abiError}
+          methodInputValues={methodInputValues}
+          onInputChange={handleInputChange}
+          onAbiUpload={handleAbiUpload}
+          onAbiTextInput={handleAbiTextInput}
+          getWritableMethods={getWritableMethods}
+          onMethodSelect={handleMethodSelect}
+          onEncodeMethodCall={encodeMethodCallWithViem}
+          authorizations={authorizationList}
+        />
 
-            <TransactionParameters
-              to={to}
-              value={value}
-              data={data}
-              gasLimit={gasLimit}
-              maxFeePerGas={maxFeePerGas}
-              maxPriorityFeePerGas={maxPriorityFeePerGas}
-              abi={abi}
-              selectedMethod={selectedMethod}
-              methodInputs={methodInputs}
-              abiError={abiError}
-              methodInputValues={methodInputValues}
-              authorizations={authorizationList}
-              onToChange={setTo}
-              onValueChange={setValue}
-              onDataChange={setData}
-              onGasLimitChange={setGasLimit}
-              onMaxFeePerGasChange={setMaxFeePerGas}
-              onMaxPriorityFeePerGasChange={setMaxPriorityFeePerGas}
-              onAbiUpload={handleAbiUpload}
-              onAbiTextInput={handleAbiTextInput}
-              onMethodSelect={handleMethodSelect}
-              onInputChange={handleInputChange}
-              onEncodeMethodCall={encodeMethodCallWithViem}
-              getWritableMethods={getWritableMethods}
-            />
+        <AuthorizationList
+          authorizationList={authorizationList}
+          onAdd={addAuthorization}
+          onRemove={removeAuthorization}
+          onUpdate={updateAuthorizationList}
+          onSign={handleSignAuthorization}
+        />
 
-            <Group>
-              <Button
-                size="lg"
-                fullWidth
-                leftSection={loading ? <IconLoader size={20} /> : <IconSend size={20} />}
-                onClick={sendEIP7702Transaction}
-                disabled={loading || !to || !authorizationList[0].contractAddress}
-                variant="gradient"
-                gradient={{ from: 'indigo', to: 'cyan' }}
-                loading={loading}
-              >
-                {loading ? 'Processing...' : 'Send EIP-7702 Transaction'}
-              </Button>
+        <Button
+          leftSection={<IconSend size={16} />}
+          size="md"
+          fullWidth
+          onClick={sendEIP7702Transaction}
+          loading={loading}
+          disabled={!isConnected || !to || !authorizationList[0]?.signedAuthorization}
+        >
+          Send EIP7702 Transaction
+        </Button>
 
-              <Button
-                variant="light"
-                onClick={() => {
-                  if (authorizationList.length > 0) {
-                    const currentChainId = chainId || 1;
-                    const authData = {
-                      authorizations: authorizationList.map(auth => ({
-                        contractAddress: auth.contractAddress,
-                        nonce: auth.nonce,
-                        signature: auth.signature,
-                        chainId: currentChainId
-                      }))
-                    };
-                    const jsonString = JSON.stringify(authData, null, 2);
-                    setTxJson(jsonString);
-                    setShowTxJson(true);
-                  }
-                }}
-                disabled={authorizationList.length === 0}
-              >
-                Show Authorization JSON
-              </Button>
-
-              <Button
-                variant="light"
-                onClick={calculateGasFees}
-                loading={isCalculatingGas}
-                disabled={!isConnected || !to}
-              >
-                Calculate Gas Fees
-              </Button>
-            </Group>
-
-            {txHash && (
-              <Alert color="blue">
-                <Stack gap="xs">
-                  <Text fw={500}>Transaction Hash:</Text>
-                  <Code block>{txHash}</Code>
-                  <Anchor
-                    href={getExplorerUrl(txHash, chainId || 1)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <Group gap={5}>
-                      <Text>View on Block Explorer</Text>
-                      <IconExternalLink size={14} />
-                    </Group>
-                  </Anchor>
-                </Stack>
-              </Alert>
-            )}
-          </>
+        {txHash && (
+          <Alert icon={<IconCheck size={16} />} color="blue" title="Transaction Sent">
+            Transaction Hash: <Anchor href={`https://sepolia.etherscan.io/tx/${txHash}`} target="_blank" rel="noopener noreferrer">{txHash} <IconExternalLink size={14} /></Anchor>
+          </Alert>
         )}
 
-        <Modal
-          opened={showTxJson}
-          onClose={() => setShowTxJson(false)}
-          title="Authorization JSON"
-          size="lg"
-        >
-          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {txJson}
-          </pre>
+        <Modal opened={showTxJson} onClose={() => setShowTxJson(false)} title="Transaction JSON" size="xl">
+          <Code block>{txJson}</Code>
         </Modal>
       </Stack>
     </Container>
   );
 };
 
-export default Home; 
+export default MetaMaskPage;

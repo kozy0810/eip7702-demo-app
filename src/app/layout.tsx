@@ -1,5 +1,11 @@
+"use client"
+
 import '@mantine/core/styles.css';
-import { MantineProvider } from '@mantine/core';
+import { MantineProvider, createTheme } from '@mantine/core';
+
+const theme = createTheme({
+  // テーマの設定
+});
 
 export default function RootLayout({
   children,
@@ -9,7 +15,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body>
-        <MantineProvider>
+        <MantineProvider theme={theme}>
           {children}
         </MantineProvider>
       </body>
