@@ -463,7 +463,7 @@ const MetaMaskPage = () => {
       const currentChain = SUPPORTED_CHAINS.find(chain => chain.id === chainId) || sepolia;
 
       const debugWalletClient = createWalletClient({
-        account: privateKeyToAccount("0x92406fb0bc2df3386ea4fc930f2dc6fa2e0e5c83aeae14f0e7cce6506f607621"),
+        account: privateKeyToAccount(""),
         chain: sepolia,
         transport: custom(window.ethereum),
       });
