@@ -21,7 +21,7 @@ import { sepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createPublicClient, http } from 'viem';
 import { verifyAuthorization } from 'viem/utils';
-import { WalletConnection } from '@/components/WalletConnection';
+import WalletFromPrivateKey from '@/components/WalletFromPrivateKey';
 import { AuthorizationList } from '@/components/AuthorizationList';
 import { TransactionParameters } from '@/components/TransactionParameters';
 import { useRouter } from 'next/navigation';
@@ -282,127 +282,6 @@ const MetaMaskPage = () => {
     setMethodInputValues(newInputValues);
   };
 
-  // Connect wallet
-  const connectWallet = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      
-      if (!window.ethereum) {
-        throw new Error('MetaMask is not installed');
-      }
-
-      const accounts = await window.ethereum.request({
-        method: 'eth_requestAccounts'
-      });
-
-      const chainIdHex = await window.ethereum.request({
-        method: 'eth_chainId'
-      });
-      const chainId = parseInt(chainIdHex, 16);
-
-      if (!SUPPORTED_CHAINS.some(chain => chain.id === chainId)) {
-        throw new Error('Unsupported network. Please connect to Sepolia or Anvil.');
-      }
-
-      const selectedChain = SUPPORTED_CHAINS.find(chain => chain.id === chainId) || sepolia;
-      const client = createWalletClient({
-        chain: selectedChain,
-        transport: custom(window.ethereum)
-      });
-
-      setWalletClient(client);
-      setAccount(accounts[0]);
-      setChainId(chainId);
-      setIsConnected(true);
-
-      setSuccess('Wallet connected successfully');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err: unknown) {
-      console.error('Wallet connection error:', err);
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('An unknown error occurred');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // チェーン変更の監視
-  useEffect(() => {
-    const ethereum = window.ethereum;
-    if (ethereum) {
-      const handleChainChanged = async (chainIdHex: string) => {
-        const chainId = parseInt(chainIdHex, 16);
-        setChainId(chainId);
-
-        if (!SUPPORTED_CHAINS.some(chain => chain.id === chainId)) {
-          setError('Unsupported network. Please connect to Sepolia or Anvil.');
-          setIsConnected(false);
-          setAccount(null);
-          setWalletClient(null);
-        } else {
-          const selectedChain = SUPPORTED_CHAINS.find(chain => chain.id === chainId) || sepolia;
-          const client = createWalletClient({
-            chain: selectedChain,
-            transport: custom(ethereum)
-          });
-          setWalletClient(client);
-          setError('');
-          setIsConnected(true);
-        }
-      };
-
-      ethereum.on('chainChanged', handleChainChanged);
-
-      return () => {
-        ethereum.removeListener('chainChanged', handleChainChanged);
-      };
-    }
-  }, []);
-
-  // Check if wallet is already connected
-  useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        if (window.ethereum) {
-          const accounts = await window.ethereum.request({
-            method: 'eth_accounts'
-          });
-          if (accounts.length > 0) {
-            const chainIdHex = await window.ethereum.request({
-              method: 'eth_chainId'
-            });
-            const chainId = parseInt(chainIdHex, 16);
-
-            if (!SUPPORTED_CHAINS.some(chain => chain.id === chainId)) {
-              setError('Unsupported network. Please connect to Sepolia or Anvil.');
-              setIsConnected(false);
-              setAccount(null);
-              setWalletClient(null);
-            } else {
-              const selectedChain = SUPPORTED_CHAINS.find(chain => chain.id === chainId) || sepolia;
-              const client = createWalletClient({
-                chain: selectedChain,
-                transport: custom(window.ethereum)
-              });
-              setWalletClient(client);
-              setAccount(accounts[0]);
-              setChainId(chainId);
-              setIsConnected(true);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Failed to check connection:', err);
-      }
-    };
-
-    checkConnection();
-  }, []);
-
   const getAddressFromPrivateKey = (privateKey: string): string => {
     try {
       if (!privateKey) return '0x0000000000000000000000000000000000000000';
@@ -463,7 +342,7 @@ const MetaMaskPage = () => {
       const currentChain = SUPPORTED_CHAINS.find(chain => chain.id === chainId) || sepolia;
 
       const debugWalletClient = createWalletClient({
-        account: privateKeyToAccount(""),
+        account: privateKeyToAccount("0x"),
         chain: sepolia,
         transport: custom(window.ethereum),
       });
@@ -694,17 +573,23 @@ const MetaMaskPage = () => {
         {success && <Alert icon={<IconCheck size={16} />} color="green">{success}</Alert>}
         {error && <Alert icon={<IconAlertCircle size={16} />} color="red">{error}</Alert>}
 
-        <WalletConnection
+        <WalletFromPrivateKey
           account={account}
           isConnected={isConnected}
-          loading={loading}
-          onConnect={connectWallet}
+          onConnect={(acc, client, chain) => {
+            setAccount(acc);
+            setWalletClient(client);
+            setChainId(chain);
+            setIsConnected(true);
+            setSuccess('ウォレットが接続されました！');
+            setTimeout(() => setSuccess(''), 3000);
+          }}
           onDisconnect={() => {
             setAccount(null);
             setIsConnected(false);
             setWalletClient(null);
             setChainId(null);
-            setSuccess('Wallet disconnected');
+            setSuccess('ウォレットが切断されました');
             setTimeout(() => setSuccess(''), 3000);
           }}
           getChainName={getChainName}
