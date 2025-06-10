@@ -6,11 +6,11 @@ import {
   Stack,
   Alert,
   Text,
-  Title,
+  Button,
+  Group,
 } from '@mantine/core';
-import { IconCheck, IconAlertCircle } from '@tabler/icons-react';
-import { createWalletClient, http } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
+import { IconCheck, IconAlertCircle, IconPlus } from '@tabler/icons-react';
+import { createWalletClient } from 'viem';
 import { sepolia, mainnet, goerli, polygon, optimism, arbitrum, base, zora, bsc, avalanche, fantom, celo } from 'viem/chains';
 import WalletFromPrivateKey from '@/components/WalletFromPrivateKey';
 import { Header } from '@/components/Header';
@@ -33,25 +33,29 @@ const SUPPORTED_CHAINS = [
 ];
 
 const SamplePage = () => {
-  const [account, setAccount] = useState<`0x${string}` | null>(null);
+  const [account, setAccount] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [walletClient, setWalletClient] = useState<ReturnType<typeof createWalletClient> | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
-  const [authorization, setAuthorization] = useState({
+  const [authorizations, setAuthorizations] = useState<Array<{
+    contractAddress: string;
+    nonce: string;
+    signature: string;
+  }>>([{
     contractAddress: '',
     nonce: '',
     signature: '',
-  });
+  }]);
 
   const getChainName = (id: number): string => {
     const chain = SUPPORTED_CHAINS.find(c => c.id === id);
     return chain ? chain.name : `Unknown Chain (ID: ${id})`;
   };
 
-  const handleConnect = (account: string, client: ReturnType<typeof createWalletClient>, chId: number) => {
-    setAccount(account as `0x${string}`);
+  const handleConnect = (acc: string, client: ReturnType<typeof createWalletClient>, chId: number) => {
+    setAccount(acc);
     setWalletClient(client);
     setChainId(chId);
     setIsConnected(true);
@@ -68,14 +72,25 @@ const SamplePage = () => {
     setTimeout(() => setSuccess(''), 3000);
   };
 
-  const handleAuthorizationUpdate = (field: 'contractAddress' | 'nonce' | 'signature', value: string) => {
-    setAuthorization(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  const handleAddAuthorization = () => {
+    setAuthorizations(prev => [...prev, {
+      contractAddress: '',
+      nonce: '',
+      signature: '',
+    }]);
   };
 
-  const handleAuthorizationSign = async () => {
+  const handleRemoveAuthorization = (index: number) => {
+    setAuthorizations(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAuthorizationUpdate = (index: number, field: 'contractAddress' | 'nonce' | 'signature', value: string) => {
+    setAuthorizations(prev => prev.map((auth, i) => 
+      i === index ? { ...auth, [field]: value } : auth
+    ));
+  };
+
+  const handleAuthorizationSign = async (index: number) => {
     if (!walletClient || !account) {
       setError('ウォレットが接続されていません。');
       return;
@@ -83,21 +98,6 @@ const SamplePage = () => {
 
     try {
       // ここに署名ロジックを実装
-      setSuccess('署名が生成されました！');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError('署名の生成に失敗しました。');
-      setTimeout(() => setError(''), 3000);
-    }
-  };
-
-  const handleSign = async () => {
-    if (!walletClient || !account) {
-      setError('ウォレットが接続されていません。');
-      return;
-    }
-
-    try {
       setSuccess('署名が生成されました！');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
@@ -122,13 +122,27 @@ const SamplePage = () => {
           getChainName={getChainName}
         />
 
-        {isConnected && account && (
-          <Authorization
-            authorization={authorization}
-            index={0}
-            onUpdate={handleAuthorizationUpdate}
-            onSign={handleSign}
-          />
+        {isConnected && (
+          <Stack>
+            <Group justify="space-between">
+              <Text fw={500}>Authorization List</Text>
+              <Button variant="light" onClick={handleAddAuthorization} leftSection={<IconPlus size={16} />}>
+                Add Authorization
+              </Button>
+            </Group>
+
+            {authorizations.map((auth, index) => (
+              <Authorization
+                key={index}
+                authorization={auth}
+                index={index}
+                onUpdate={(field, value) => handleAuthorizationUpdate(index, field, value)}
+                onSign={() => handleAuthorizationSign(index)}
+                showRemoveButton={authorizations.length > 1}
+                onRemove={() => handleRemoveAuthorization(index)}
+              />
+            ))}
+          </Stack>
         )}
       </Stack>
     </Container>

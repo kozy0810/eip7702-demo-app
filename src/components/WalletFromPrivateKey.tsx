@@ -9,6 +9,7 @@ import {
   TextInput,
   Alert,
   Select,
+  PasswordInput,
 } from '@mantine/core';
 import { IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -52,7 +53,7 @@ const WalletFromPrivateKey: React.FC<WalletFromPrivateKeyProps> = ({
   chainId,
   getChainName,
 }) => {
-  const [privateKey, setPrivateKey] = useState<string>('');
+  const [privateKey, setPrivateKey] = useState<string>('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [balance, setBalance] = useState<string | null>(null);
@@ -207,7 +208,7 @@ const WalletFromPrivateKey: React.FC<WalletFromPrivateKeyProps> = ({
               }))}
               disabled={loading}
             />
-            <TextInput
+            <PasswordInput
               label="プライベートキー"
               placeholder="0x..." 
               value={privateKey}
