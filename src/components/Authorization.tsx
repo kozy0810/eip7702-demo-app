@@ -4,13 +4,14 @@ import { SignAuthorizationReturnType } from 'viem';
 import { verifyAuthorization } from 'viem/utils'
 import { IconPlus, IconMinus } from '@tabler/icons-react';
 import { privateKeyToAccount } from 'viem/accounts';
-import { createPublicClient, createWalletClient, http } from 'viem';
-import { mainnet } from 'viem/chains';
+import { createPublicClient, createWalletClient, http, Transport } from 'viem';
+import { mainnet, sepolia, anvil } from 'viem/chains';
 
 interface Authorization {
   contractAddress: string;
   nonce: string;
   signature: string;
+  privateKey: string;
   signedAuthorization?: SignAuthorizationReturnType;
 }
 
@@ -18,10 +19,14 @@ interface AuthorizationProps {
   authorization: Authorization;
   index: number;
   onRemove?: () => void;
-  onUpdate: (field: 'contractAddress' | 'nonce' | 'signature', value: string) => void;
+  onUpdate: (field: 'contractAddress' | 'nonce' | 'signature' | 'privateKey', value: string) => void;
   onSign: () => Promise<void>;
   showRemoveButton?: boolean;
+  chainId: number;
+  transport: Transport;
 }
+
+const SUPPORTED_CHAINS = [sepolia, anvil];
 
 export const Authorization: React.FC<AuthorizationProps> = ({
   authorization,
@@ -30,6 +35,8 @@ export const Authorization: React.FC<AuthorizationProps> = ({
   onUpdate,
   onSign,
   showRemoveButton = false,
+  chainId,
+  transport = http(),
 }) => {
   const [privateKey, setPrivateKey] = useState('');
   const [isPrivateKeySubmitted, setIsPrivateKeySubmitted] = useState(false);
@@ -46,7 +53,7 @@ export const Authorization: React.FC<AuthorizationProps> = ({
       setIsPrivateKeySubmitted(true);
 
       const publicClient = createPublicClient({
-        chain: mainnet,
+        chain: SUPPORTED_CHAINS.find(chain => chain.id === chainId) || sepolia,
         transport: http()
       });
 
@@ -64,6 +71,7 @@ export const Authorization: React.FC<AuthorizationProps> = ({
 
   const handlePrivateKeyChange = (value: string) => {
     setPrivateKey(value);
+    onUpdate('privateKey', value);
     if (!value) {
       onUpdate('contractAddress', '');
       onUpdate('nonce', '');
@@ -92,36 +100,27 @@ export const Authorization: React.FC<AuthorizationProps> = ({
   };
 
   const handleSign = async () => {
-    if (!authorization.contractAddress || !authorization.nonce || !privateKey) {
+    if (!authorization.privateKey || !authorization.contractAddress || !authorization.nonce) {
       return;
     }
-
+    
+    setIsSigning(true);
     try {
-      setIsSigning(true);
-      const formattedPrivateKey = (privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`) as `0x${string}`;
-      const account = privateKeyToAccount(formattedPrivateKey);
-
       const walletClient = createWalletClient({
-        account,
-        chain: mainnet,
-        transport: http()
+        account: privateKeyToAccount(authorization.privateKey as `0x${string}`),
+        transport,
       });
 
-      const signedAuthorization = await walletClient.signAuthorization({
-        account,
-        contractAddress: authorization.contractAddress as `0x${string}`,
-        nonce: parseInt(authorization.nonce, 10)
+      const message = `Contract Address: ${authorization.contractAddress}\nNonce: ${authorization.nonce}`;
+      const signature = await walletClient.signMessage({
+        account: walletClient.account,
+        message,
       });
-      console.log(signedAuthorization);
-      console.log(await verifyAuthorization({address: account.address, authorization: signedAuthorization}))
 
-      const yParity = signedAuthorization.yParity ? 1 : 0;
-      const v = yParity + 27;
-      const signature = `0x${signedAuthorization.r.slice(2)}${signedAuthorization.s.slice(2)}${v.toString(16).padStart(2, '0')}`;
       onUpdate('signature', signature);
-      await onSign();
+      onSign();
     } catch (error) {
-      console.error('Error signing:', error);
+      console.error('Signing error:', error);
     } finally {
       setIsSigning(false);
     }

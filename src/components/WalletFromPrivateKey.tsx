@@ -6,24 +6,24 @@ import {
   Text,
   Badge,
   Stack,
-  TextInput,
   Alert,
   Select,
   PasswordInput,
 } from '@mantine/core';
-import { IconAlertCircle, IconCheck } from '@tabler/icons-react';
+import { IconAlertCircle } from '@tabler/icons-react';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createWalletClient, http, formatEther } from 'viem';
 import { createPublicClient } from 'viem';
 import { sepolia } from 'viem/chains';
 
 interface WalletFromPrivateKeyProps {
-  onConnect: (account: string, walletClient: ReturnType<typeof createWalletClient>, chainId: number) => void;
+  onConnect: (account: string, client: ReturnType<typeof createWalletClient>, chainId: number) => void;
   onDisconnect: () => void;
   isConnected: boolean;
-  account: string | null;
+  account: `0x${string}` | null;
   chainId: number | null;
   getChainName: (id: number) => string;
+  walletClient: ReturnType<typeof createWalletClient> | null;
 }
 
 // anvilのチェーン設定 (MetaMaskPage.tsx と重複しますが、ここでは独立して定義します)
@@ -52,13 +52,13 @@ const WalletFromPrivateKey: React.FC<WalletFromPrivateKeyProps> = ({
   account,
   chainId,
   getChainName,
+  walletClient,
 }) => {
-  const [privateKey, setPrivateKey] = useState<string>('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [privateKey, setPrivateKey] = useState('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
   const [balance, setBalance] = useState<string | null>(null);
   const [selectedChain, setSelectedChain] = useState<string>(sepolia.id.toString());
-  const [walletClient, setWalletClient] = useState<ReturnType<typeof createWalletClient> | null>(null);
 
   useEffect(() => {
     if (account && chainId) {
@@ -88,11 +88,11 @@ const WalletFromPrivateKey: React.FC<WalletFromPrivateKeyProps> = ({
   const handleChainChange = async (newChainId: string) => {
     if (!walletClient || !account) return;
     
-    setLoading(true);
-    setError(null);
+    setIsLoading(true);
+    setError('');
     try {
       const chain = SUPPORTED_CHAINS.find(c => c.id.toString() === newChainId) || sepolia;
-      const newClient = createWalletClient({
+      const client = createWalletClient({
         account: walletClient.account,
         chain: chain,
         transport: http(chain.rpcUrls.default.http[0])
@@ -104,51 +104,41 @@ const WalletFromPrivateKey: React.FC<WalletFromPrivateKeyProps> = ({
       });
       const currentChainId = await publicClient.getChainId();
 
-      onConnect(account, newClient, currentChainId);
-      setWalletClient(newClient);
+      onConnect(account, client, currentChainId);
       setSelectedChain(newChainId);
     } catch (err: any) {
       setError(err.message || 'チェーンの切り替えに失敗しました。');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
   const handleConnect = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      if (!privateKey.startsWith('0x') || privateKey.length !== 66) {
-        throw new Error('無効なプライベートキーです。0xから始まり66文字の16進数文字列である必要があります。');
-      }
+    if (!privateKey) return;
 
-      const chain = SUPPORTED_CHAINS.find(c => c.id.toString() === selectedChain) || sepolia;
-      const acc = privateKeyToAccount(privateKey as `0x${string}`);
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const formattedPrivateKey = (privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`) as `0x${string}`;
+      const account = privateKeyToAccount(formattedPrivateKey);
       const client = createWalletClient({
-        account: acc,
-        chain: chain,
-        transport: http(chain.rpcUrls.default.http[0])
-      });
-      
-      const publicClient = createPublicClient({
-        chain: chain,
+        account,
+        chain: SUPPORTED_CHAINS.find(chain => chain.id.toString() === selectedChain) || sepolia,
         transport: http()
       });
-      const currentChainId = await publicClient.getChainId();
 
-      setWalletClient(client);
-      onConnect(acc.address, client, currentChainId);
-    } catch (err: any) {
-      setError(err.message || 'ウォレットの接続に失敗しました。');
-      onDisconnect();
+      onConnect(account.address, client, client.chain.id);
+    } catch (err) {
+      console.error('Connection error:', err);
+      setError('ウォレットの接続に失敗しました。');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
   const handleDisconnect = () => {
     setPrivateKey('');
-    setWalletClient(null);
     onDisconnect();
     setBalance(null);
   };
@@ -177,7 +167,7 @@ const WalletFromPrivateKey: React.FC<WalletFromPrivateKeyProps> = ({
                   variant="light"
                   color="red"
                   onClick={handleDisconnect}
-                  disabled={loading}
+                  disabled={isLoading}
                 >
                   Disconnect
                 </Button>
@@ -206,20 +196,20 @@ const WalletFromPrivateKey: React.FC<WalletFromPrivateKeyProps> = ({
                 value: chain.id.toString(),
                 label: chain.name
               }))}
-              disabled={loading}
+              disabled={isLoading}
             />
             <PasswordInput
               label="プライベートキー"
               placeholder="0x..." 
               value={privateKey}
               onChange={(event) => setPrivateKey(event.currentTarget.value)}
-              disabled={loading}
+              disabled={isLoading}
             />
             <Button
               variant="light"
               color="blue"
               onClick={handleConnect}
-              loading={loading}
+              loading={isLoading}
             >
               Connect Wallet
             </Button>

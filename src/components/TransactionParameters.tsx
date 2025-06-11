@@ -71,6 +71,7 @@ export const TransactionParameters: React.FC<TransactionParametersProps> = ({
   getWritableMethods
 }) => {
   const [showTxParams, setShowTxParams] = React.useState(false);
+  const [showGasParams, setShowGasParams] = React.useState(false);
   const [selectedAbiInput, setSelectedAbiInput] = React.useState<'predefined' | 'file' | 'json' | null>(null);
 
   const handleContractSelect = (contractName: string | null) => {
@@ -258,50 +259,35 @@ export const TransactionParameters: React.FC<TransactionParametersProps> = ({
           </Stack>
         </Paper>
 
-        <TextInput
-          label="To Address"
-          placeholder="0x..."
-          value={to}
-          onChange={(e) => onToChange(e.target.value)}
-        />
+        <Paper p="md" withBorder>
+          <Title order={4} mb="md">Transaction Details</Title>
+          <Stack gap="md">
+            <TextInput
+              label="To Address"
+              placeholder="0x..."
+              value={to}
+              onChange={(e) => onToChange(e.target.value)}
+              required
+            />
 
-        <Grid>
-          <Grid.Col span={{ base: 12, md: 6 }}>
             <TextInput
               label="Value (ETH)"
               placeholder="0.0"
-              value={value}
-              onChange={(e) => onValueChange(e.target.value)}
+              value={value || '0'}
+              onChange={(e) => {
+                const input = e.target.value;
+                // 数値と小数点のみを許可
+                if (input === '' || /^\d*\.?\d*$/.test(input)) {
+                  onValueChange(input);
+                }
+              }}
+              required
+              description="Enter amount in ETH (e.g., 0.1, 0.222)"
             />
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, md: 6 }}>
-            <TextInput
-              label="Gas Limit"
-              value={gasLimit}
-              onChange={(e) => onGasLimitChange(e.target.value)}
-            />
-          </Grid.Col>
-        </Grid>
 
-        <Grid>
-          <Grid.Col span={{ base: 12, md: 6 }}>
             <TextInput
-              label="Max Fee Per Gas (Gwei)"
-              value={maxFeePerGas}
-              onChange={(e) => onMaxFeePerGasChange(e.target.value)}
-            />
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, md: 6 }}>
-            <TextInput
-              label="Max Priority Fee Per Gas (Gwei)"
-              value={maxPriorityFeePerGas}
-              onChange={(e) => onMaxPriorityFeePerGasChange(e.target.value)}
-            />
-          </Grid.Col>
-          <Grid.Col span={12}>
-            <Textarea
               label={
-                <Group gap={5}>
+                <Group justify="space-between" align="center">
                   <Text>Data (Hex)</Text>
                   {selectedMethod && (
                     <Badge size="xs" variant="light">
@@ -311,9 +297,8 @@ export const TransactionParameters: React.FC<TransactionParametersProps> = ({
                 </Group>
               }
               placeholder="0x"
-              value={data}
+              value={data || '0x'}
               onChange={(e) => onDataChange(e.target.value)}
-              minRows={3}
               styles={{ input: { fontFamily: 'monospace', fontSize: '12px' } }}
             />
             {selectedMethod && (
@@ -321,34 +306,68 @@ export const TransactionParameters: React.FC<TransactionParametersProps> = ({
                 Generated from method: {selectedMethod}()
               </Text>
             )}
-          </Grid.Col>
-          <Grid.Col span={12}>
-            <Group justify="flex-end" gap="md">
-              <Button
-                variant="light"
-                color="blue"
-                onClick={() => {
-                  const txParams = {
-                    to,
-                    value: value ? `0x${parseFloat(value).toString(16)}` : '0x0',
-                    data,
-                    gasLimit: gasLimit ? `0x${parseInt(gasLimit).toString(16)}` : undefined,
-                    maxFeePerGas: maxFeePerGas ? `0x${parseInt(maxFeePerGas).toString(16)}` : undefined,
-                    maxPriorityFeePerGas: maxPriorityFeePerGas ? `0x${parseInt(maxPriorityFeePerGas).toString(16)}` : undefined,
-                    authorizations: authorizations.map(auth => ({
-                      contractAddress: auth.contractAddress,
-                      nonce: auth.nonce,
-                      signature: auth.signature
-                    }))
-                  };
-                  setShowTxParams(true);
-                }}
-              >
-                Show Transaction JSON
-              </Button>
-            </Group>
-          </Grid.Col>
-        </Grid>
+          </Stack>
+        </Paper>
+
+        <Paper p="md" withBorder>
+          <Group justify="space-between" mb="md">
+            <Text fw={500}>Gas Parameters (Optional)</Text>
+            <Button
+              variant="subtle"
+              size="xs"
+              onClick={() => setShowGasParams(!showGasParams)}
+            >
+              {showGasParams ? 'Hide' : 'Show'}
+            </Button>
+          </Group>
+          {showGasParams && (
+            <Stack gap="md">
+              <TextInput
+                label="Gas Limit"
+                value={gasLimit}
+                onChange={(e) => onGasLimitChange(e.target.value)}
+                placeholder="Auto-calculated if not specified"
+              />
+              <TextInput
+                label="Max Fee Per Gas (Gwei)"
+                value={maxFeePerGas}
+                onChange={(e) => onMaxFeePerGasChange(e.target.value)}
+                placeholder="Auto-calculated if not specified"
+              />
+              <TextInput
+                label="Max Priority Fee Per Gas (Gwei)"
+                value={maxPriorityFeePerGas}
+                onChange={(e) => onMaxPriorityFeePerGasChange(e.target.value)}
+                placeholder="Auto-calculated if not specified"
+              />
+            </Stack>
+          )}
+        </Paper>
+
+        <Group justify="flex-end" gap="md">
+          <Button
+            variant="light"
+            color="blue"
+            onClick={() => {
+              const txParams = {
+                to,
+                value: value ? `0x${(BigInt(Math.floor(parseFloat(value) * 1e18))).toString(16)}` : '0x0',
+                data,
+                gasLimit: gasLimit ? `0x${parseInt(gasLimit).toString(16)}` : undefined,
+                maxFeePerGas: maxFeePerGas ? `0x${parseInt(maxFeePerGas).toString(16)}` : undefined,
+                maxPriorityFeePerGas: maxPriorityFeePerGas ? `0x${parseInt(maxPriorityFeePerGas).toString(16)}` : undefined,
+                authorizations: authorizations.map(auth => ({
+                  contractAddress: auth.contractAddress,
+                  nonce: auth.nonce,
+                  signature: auth.signature
+                }))
+              };
+              setShowTxParams(true);
+            }}
+          >
+            Show Transaction JSON
+          </Button>
+        </Group>
 
         <Modal
           opened={showTxParams}
@@ -362,7 +381,7 @@ export const TransactionParameters: React.FC<TransactionParametersProps> = ({
               <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                 {JSON.stringify({
                   to,
-                  value: value ? `0x${parseFloat(value).toString(16)}` : '0x0',
+                  value: value ? `0x${(BigInt(Math.floor(parseFloat(value) * 1e18))).toString(16)}` : '0x0',
                   data,
                   gasLimit: gasLimit ? `0x${parseInt(gasLimit).toString(16)}` : undefined,
                   maxFeePerGas: maxFeePerGas ? `0x${parseInt(maxFeePerGas).toString(16)}` : undefined,
