@@ -19,7 +19,7 @@ interface AuthorizationProps {
   authorization: Authorization;
   index: number;
   onRemove?: () => void;
-  onUpdate: (field: 'contractAddress' | 'nonce' | 'signature' | 'privateKey', value: string) => void;
+  onUpdate: (field: 'contractAddress' | 'nonce' | 'signature' | 'privateKey' | 'signedAuthorization', value: string | SignAuthorizationReturnType) => void;
   onSign: () => Promise<void>;
   showRemoveButton?: boolean;
   chainId: number;
@@ -111,13 +111,19 @@ export const Authorization: React.FC<AuthorizationProps> = ({
         transport,
       });
 
-      const message = `Contract Address: ${authorization.contractAddress}\nNonce: ${authorization.nonce}`;
-      const signature = await walletClient.signMessage({
+      const signedAuthorization = await walletClient.signAuthorization({
         account: walletClient.account,
-        message,
+        nonce: parseInt(authorization.nonce, 10),
+        contractAddress: authorization.contractAddress as `0x${string}`,
       });
 
-      onUpdate('signature', signature);
+      console.log("signedAuthorization", signedAuthorization);
+      console.log("verifyAuthorization", await verifyAuthorization({
+        address: walletClient.account.address,
+        authorization: signedAuthorization,
+      }));
+
+      onUpdate('signedAuthorization', signedAuthorization);
       onSign();
     } catch (error) {
       console.error('Signing error:', error);

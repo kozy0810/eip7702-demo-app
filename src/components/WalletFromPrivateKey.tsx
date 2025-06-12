@@ -54,7 +54,7 @@ const WalletFromPrivateKey: React.FC<WalletFromPrivateKeyProps> = ({
   getChainName,
   walletClient,
 }) => {
-  const [privateKey, setPrivateKey] = useState('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
+  const [privateKey, setPrivateKey] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [balance, setBalance] = useState<string | null>(null);

@@ -12,17 +12,17 @@ import {
   Code,
   Anchor,
   Modal,
+  TextInput,
+  Box,
 } from '@mantine/core';
 import { IconCheck, IconAlertCircle, IconPlus, IconLoader, IconSend, IconExternalLink } from '@tabler/icons-react';
-import { createWalletClient, http, createPublicClient } from 'viem';
-import { SignAuthorizationReturnType } from 'viem';
+import { createWalletClient, http, createPublicClient, SignAuthorizationReturnType, parseEther, encodeFunctionData } from 'viem';
 import { sepolia, anvil } from 'viem/chains';
 import WalletFromPrivateKey from '@/components/WalletFromPrivateKey';
 import { Header } from '@/components/Header';
 import { Authorization } from '@/components/Authorization';
 import { TransactionParameters } from '@/components/TransactionParameters';
 import { AbiItem, MethodInput } from '@/types/abi';
-import { parseEther } from 'viem';
 
 interface AuthorizationInput {
   contractAddress: string;
@@ -62,8 +62,12 @@ const SamplePage = () => {
   const [selectedMethod, setSelectedMethod] = useState('');
   const [methodInputs, setMethodInputs] = useState<MethodInput[]>([]);
   const [abiError, setAbiError] = useState('');
-  const [methodInputValues, setMethodInputValues] = useState<Record<number, string>>({});
+  const [methodInputValues, setMethodInputValues] = useState<Record<string, string>>({});
+  const [tupleArrayLengths, setTupleArrayLengths] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
+  const [showTxReceipt, setShowTxReceipt] = useState(false);
+  const [txReceipt, setTxReceipt] = useState<any>(null);
+  const [isLoadingReceipt, setIsLoadingReceipt] = useState(false);
 
   const getChainName = (id: number): string => {
     const chain = SUPPORTED_CHAINS.find(c => c.id === id);
@@ -71,11 +75,22 @@ const SamplePage = () => {
   };
 
   const handleConnect = (acc: string, client: ReturnType<typeof createWalletClient>, chId: number) => {
+    const currentChain = SUPPORTED_CHAINS.find(chain => chain.id === chId) || sepolia;
+    // const rpcUrl = currentChain.id === anvil.id 
+    //   ? 'http://localhost:8545'
+    //   : 'https://eth-sepolia.g.alchemy.com/v2/KPzrBnLGj_1twv49syaYDn2raEuTKQLF';
+
+    const newClient = createWalletClient({
+      account: client.account,
+      chain: currentChain,
+      transport: http()
+    });
+
     setAccount(acc as `0x${string}`);
-    setExecutorWalletClient(client);
+    setExecutorWalletClient(newClient);
     setChainId(chId);
     setIsConnected(true);
-    setSuccess('ウォレットが正常に接続されました！');
+    setSuccess('Wallet connected successfully!');
     setTimeout(() => setSuccess(''), 3000);
   };
 
@@ -84,7 +99,7 @@ const SamplePage = () => {
     setIsConnected(false);
     setExecutorWalletClient(null);
     setChainId(null);
-    setSuccess('ウォレットが切断されました。');
+    setSuccess('Wallet disconnected.');
     setTimeout(() => setSuccess(''), 3000);
   };
 
@@ -101,24 +116,39 @@ const SamplePage = () => {
     setAuthorizations(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleAuthorizationUpdate = (index: number, field: 'contractAddress' | 'nonce' | 'signature' | 'privateKey', value: string) => {
-    setAuthorizations(prev => prev.map((auth, i) => 
-      i === index ? { ...auth, [field]: value } : auth
-    ));
+  const handleAuthorizationUpdate = (
+    index: number,
+    field: 'contractAddress' | 'nonce' | 'signature' | 'privateKey' | 'signedAuthorization',
+    value: string | SignAuthorizationReturnType
+  ) => {
+    setAuthorizations(prev => prev.map((auth, i) => {
+      if (i === index) {
+        if (field === 'signedAuthorization') {
+          const signedAuth = value as SignAuthorizationReturnType;
+          return {
+            ...auth,
+            signedAuthorization: signedAuth,
+            signature: `${signedAuth.r}${signedAuth.s.slice(2)}${signedAuth.yParity?.toString(16).padStart(2, '0') || '1b'}`
+          };
+        }
+        return { ...auth, [field]: value };
+      }
+      return auth;
+    }));
   };
 
   const handleAuthorizationSign = async (index: number) => {
     if (!signerWalletClients || !account) {
-      setError('ウォレットが接続されていません。');
+      setError('Wallet is not connected.');
       return;
     }
 
     try {
       // ここに署名ロジックを実装
-      setSuccess('署名が生成されました！');
+      setSuccess('Signature generated successfully!');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError('署名の生成に失敗しました。');
+      setError('Failed to generate signature.');
       setTimeout(() => setError(''), 3000);
     }
   };
@@ -154,18 +184,191 @@ const SamplePage = () => {
     if (method && method.inputs) {
       setSelectedMethod(value);
       setMethodInputs(method.inputs);
+      setMethodInputValues({});
+      const initialTupleLengths: Record<string, number> = {};
+      method.inputs.forEach((input, index) => {
+        if (input.type.endsWith('[]') && input.components) {
+          initialTupleLengths[index] = 1;
+        }
+      });
+      setTupleArrayLengths(initialTupleLengths);
+    } else {
+      setError('Selected method not found.');
     }
   };
 
-  const handleInputChange = (index: number, value: string) => {
+  const handleInputChange = (index: string, value: string) => {
     setMethodInputValues(prev => ({
       ...prev,
       [index]: value
     }));
   };
 
+  const handleAddTupleElement = (inputIndex: number) => {
+    setTupleArrayLengths(prev => ({
+      ...prev,
+      [inputIndex]: (prev[inputIndex] || 0) + 1
+    }));
+  };
+
+  const handleRemoveTupleElement = (inputIndex: number) => {
+    setTupleArrayLengths(prev => ({
+      ...prev,
+      [inputIndex]: Math.max(0, (prev[inputIndex] || 0) - 1)
+    }));
+  };
+
   const handleEncodeMethodCall = () => {
-    // TODO: Implement method call encoding
+    if (!selectedMethod || !abi) {
+      setError('Method is not selected.');
+      return;
+    }
+
+    const method = abi.find((item: AbiItem) => item.name === selectedMethod && item.type === 'function');
+    if (!method) {
+      setError('Selected method not found.');
+      return;
+    }
+
+    if (!method.inputs) {
+      setError('Method input parameters not found.');
+      return;
+    }
+    console.log("method", method);
+
+    try {
+      const args = method.inputs.map((input: MethodInput, index: number) => {
+        console.log("Processing input:", input);
+        if (input.type.endsWith('[]') && input.components) {
+          // tuple[]型の処理
+          const arrayLength = tupleArrayLengths[index] || 1;
+          console.log(`Tuple array input ${index}:`, { input, arrayLength });
+
+          // 各タプルの値を処理
+          const result = Array.from({ length: arrayLength }).map((_, tupleIndex) => {
+            const tupleValues: Record<string, any> = {};
+            input.components!.forEach((component, compIndex) => {
+              const key = `${index}-${tupleIndex}-${compIndex}`;
+              const componentValue = methodInputValues[key] || '';
+              console.log(`Processing tuple[${tupleIndex}] component[${compIndex}]:`, {
+                key,
+                component,
+                value: componentValue
+              });
+
+              if (!componentValue) return;
+
+              if (component.type === 'address') {
+                tupleValues[component.name || `param${compIndex}`] = componentValue;
+              } else if (component.type.startsWith('uint') || component.type.startsWith('int')) {
+                tupleValues[component.name || `param${compIndex}`] = BigInt(componentValue);
+              } else if (component.type === 'string') {
+                tupleValues[component.name || `param${compIndex}`] = componentValue;
+              } else if (component.type === 'bytes') {
+                tupleValues[component.name || `param${compIndex}`] = componentValue;
+              } else if (component.type === 'bool') {
+                tupleValues[component.name || `param${compIndex}`] = componentValue === 'true';
+              } else {
+                tupleValues[component.name || `param${compIndex}`] = componentValue;
+              }
+            });
+
+            console.log(`Tuple[${tupleIndex}] values:`, tupleValues);
+            return tupleValues;
+          });
+
+          console.log("Final tuple array result:", result);
+          return result;
+        } else if (input.type === 'tuple' && input.components) {
+          // 単一タプルの処理
+          const tupleValues: Record<string, any> = {};
+          input.components.forEach((component, compIndex) => {
+            const value = methodInputValues[`${index}-${compIndex}`] || '';
+            console.log(`Tuple component ${compIndex}:`, { component, value });
+            if (!value) return;
+
+            if (component.type === 'address') {
+              tupleValues[component.name || `param${compIndex}`] = value;
+            } else if (component.type.startsWith('uint') || component.type.startsWith('int')) {
+              tupleValues[component.name || `param${compIndex}`] = BigInt(value);
+            } else if (component.type === 'string') {
+              tupleValues[component.name || `param${compIndex}`] = value;
+            } else if (component.type === 'bytes') {
+              tupleValues[component.name || `param${compIndex}`] = value;
+            } else if (component.type === 'bool') {
+              tupleValues[component.name || `param${compIndex}`] = value === 'true';
+            } else {
+              tupleValues[component.name || `param${compIndex}`] = value;
+            }
+          });
+
+          console.log("Tuple values:", tupleValues);
+          return tupleValues;
+        }
+
+        // 通常の型の処理
+        const value = methodInputValues[index] || '';
+        console.log(`Regular input ${index}:`, { input, value });
+        if (!value) return null;
+
+        if (input.type === 'address') {
+          return value;
+        } else if (input.type.startsWith('uint') || input.type.startsWith('int')) {
+          return BigInt(value);
+        } else if (input.type === 'string') {
+          return value;
+        } else if (input.type === 'bytes') {
+          return value;
+        } else if (input.type === 'bool') {
+          return value === 'true';
+        } else if (input.type.endsWith('[]')) {
+          const values = value.split(',').map((v: string) => v.trim());
+          if (input.type === 'address[]') {
+            return values;
+          } else if (input.type.startsWith('uint') || input.type.startsWith('int')) {
+            return values.map((v: string) => BigInt(v));
+          } else if (input.type === 'bool[]') {
+            return values.map((v: string) => v === 'true');
+          }
+          return values;
+        }
+        return value;
+      }).filter((arg: any) => arg !== null);
+
+      console.log("Final args:", args);
+      console.log("Method inputs:", method.inputs);
+      console.log("Method input values:", methodInputValues);
+
+      const abiItem = {
+        type: 'function',
+        name: method.name,
+        inputs: method.inputs.map(input => ({
+          ...input,
+          type: input.type === 'tuple[]' ? 'tuple[]' : input.type
+        })),
+        outputs: method.outputs,
+        stateMutability: method.stateMutability
+      };
+      console.log("ABI item:", abiItem);
+
+      const encodedData = encodeFunctionData({
+        abi: [abiItem],
+        functionName: method.name,
+        args: args
+      });
+
+      console.log("encodedData", encodedData);
+      setData(encodedData);
+      setSuccess('Method call encoded successfully');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: unknown) {
+      console.error("Encoding error:", err);
+      if (err instanceof Error) {
+        setError('Failed to encode method call: ' + err.message);
+      } else {
+        setError('An unknown error occurred');
+      }
+    }
   };
 
   const getWritableMethods = () => {
@@ -185,32 +388,63 @@ const SamplePage = () => {
     return `${baseUrl}/tx/${txHash}`;
   };
 
+  const shouldShowExplorer = (chainId: number) => {
+    return chainId !== anvil.id;
+  };
+
+  const handleShowReceipt = async () => {
+    if (!txHash || !chainId) return;
+    
+    setIsLoadingReceipt(true);
+    try {
+      const currentChain = SUPPORTED_CHAINS.find(chain => chain.id === chainId) || sepolia;
+      const publicClient = createPublicClient({
+        chain: currentChain,
+        transport: http()
+      });
+
+      const receipt = await publicClient.waitForTransactionReceipt({
+        hash: txHash as `0x${string}`
+      });
+      
+      // BigIntを文字列に変換
+      const stringifiedReceipt = JSON.parse(JSON.stringify(receipt, (_, value) =>
+        typeof value === 'bigint' ? value.toString() : value
+      ));
+      
+      setTxReceipt(stringifiedReceipt);
+      setShowTxReceipt(true);
+    } catch (error) {
+      console.error('Error fetching transaction receipt:', error);
+      setError('Failed to fetch transaction receipt');
+    } finally {
+      setIsLoadingReceipt(false);
+    }
+  };
+
   const sendEIP7702Transaction = async () => {
     if (!executorWalletClient || !account || !chainId) {
-      setError('ウォレットが接続されていません。');
+      setError('Wallet is not connected.');
       return;
     }
 
     setLoading(true);
     try {
       const currentChain = SUPPORTED_CHAINS.find(chain => chain.id === chainId) || sepolia;
-      const formattedAuthorizations = authorizations.map(auth => {
-        const signature = auth.signature as `0x${string}`;
-        const r = signature.slice(0, 66) as `0x${string}`;
-        const s = `0x${signature.slice(66, 130)}` as `0x${string}`;
-        const yParity = parseInt(signature.slice(130, 132), 16);
-        return {
-          address: auth.contractAddress as `0x${string}`,
-          chainId: currentChain.id,
-          nonce: parseInt(auth.nonce, 10),
-          r,
-          s,
-          yParity,
-        };
+      // const rpcUrl = currentChain.id === anvil.id 
+      //   ? 'http://localhost:8545'
+      //   : 'https://eth-sepolia.g.alchemy.com/v2/KPzrBnLGj_1twv49syaYDn2raEuTKQLF';
+
+      const authorizationList = authorizations.map(auth => {
+        if (!auth.signedAuthorization) {
+          throw new Error('Authorization not signed');
+        }
+        return auth.signedAuthorization;
       });
 
       const publicClient = createPublicClient({
         chain: currentChain,
+        // transport: http(rpcUrl)
         transport: http()
       });
 
@@ -220,35 +454,119 @@ const SamplePage = () => {
           to: to as `0x${string}`,
           value: parseEther(value || '0'),
           data: data as `0x${string}`,
-          authorizationList: formattedAuthorizations,
+          authorizationList: authorizationList,
         }),
         publicClient.getGasPrice()
       ]);
 
+      if (!executorWalletClient?.account) {
+        throw new Error('Wallet account not found');
+      }
+
       const params = {
-        authorizationList: formattedAuthorizations,
+        authorizationList: authorizationList,
         to: to as `0x${string}`,
         value: parseEther(value || '0'),
         data: data as `0x${string}`,
         gas: gasLimit ? BigInt(gasLimit) : estimatedGas,
         maxFeePerGas: maxFeePerGas ? BigInt(maxFeePerGas) : gasPrice * BigInt(2),
         maxPriorityFeePerGas: maxPriorityFeePerGas ? BigInt(maxPriorityFeePerGas) : gasPrice,
-        account,
+        account: executorWalletClient.account,
         chain: currentChain,
       }
       console.log("params", params);
-      const tx = await executorWalletClient.sendTransaction(params);
-      console.log("tx", tx);
+      console.log("executorWalletClient", executorWalletClient);
+      console.log("executorWalletClient.uid", executorWalletClient.uid);
+
+      // executorWalletClientを使用してトランザクションを送信
+      const tx = await executorWalletClient.sendTransaction(params) as `0x${string}`;
 
       setTxHash(tx);
-      setSuccess('トランザクションが送信されました！');
+      setSuccess('Transaction sent successfully!');
       setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
       console.error('Transaction error:', error);
-      setError('トランザクションの送信に失敗しました。');
+      setError('Failed to send transaction.');
       setTimeout(() => setError(''), 3000);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const renderMethodInput = (input: MethodInput, inputIndex: number) => {
+    if (input.type.endsWith('[]') && input.components) {
+      // tuple[]型の入力フィールド
+      const arrayLength = tupleArrayLengths[inputIndex] || 1;
+      return (
+        <Stack key={inputIndex} gap="xs">
+          <Group justify="space-between">
+            <Text size="sm" fw={500} c="indigo">{input.name || `Parameter ${inputIndex}`}</Text>
+            <Button
+              variant="light"
+              size="xs"
+              onClick={() => handleAddTupleElement(inputIndex)}
+              leftSection={<IconPlus size={14} />}
+            >
+              Add Element
+            </Button>
+          </Group>
+          {Array.from({ length: arrayLength }).map((_, tupleIndex) => (
+            <Card key={tupleIndex} withBorder p="xs">
+              <Stack gap="xs">
+                <Group justify="space-between">
+                  <Text size="sm" fw={500} c="indigo">Element {tupleIndex + 1}</Text>
+                  {arrayLength > 1 && (
+                    <Button
+                      variant="light"
+                      color="red"
+                      size="xs"
+                      onClick={() => handleRemoveTupleElement(inputIndex)}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </Group>
+                {input.components!.map((component, compIndex) => (
+                  <TextInput
+                    key={`${inputIndex}-${tupleIndex}-${compIndex}`}
+                    label={component.name || `Component ${compIndex}`}
+                    placeholder={component.type}
+                    value={methodInputValues[`${inputIndex}-${tupleIndex}-${compIndex}`] || ''}
+                    onChange={(e) => handleInputChange(`${inputIndex}-${tupleIndex}-${compIndex}`, e.target.value)}
+                  />
+                ))}
+              </Stack>
+            </Card>
+          ))}
+        </Stack>
+      );
+    } else if (input.type === 'tuple' && input.components) {
+      // 単一タプルの入力フィールド
+      return (
+        <Stack key={inputIndex} gap="xs">
+          <Text size="sm" fw={500} c="indigo">{input.name || `Parameter ${inputIndex}`}</Text>
+          {input.components.map((component, compIndex) => (
+            <TextInput
+              key={`${inputIndex}-${compIndex}`}
+              label={component.name || `Component ${compIndex}`}
+              placeholder={component.type}
+              value={methodInputValues[`${inputIndex}-${compIndex}`] || ''}
+              onChange={(e) => handleInputChange(`${inputIndex}-${compIndex}`, e.target.value)}
+            />
+          ))}
+        </Stack>
+      );
+    } else {
+      // 通常の入力フィールド
+      return (
+        <TextInput
+          key={inputIndex}
+          label={input.name || `Parameter ${inputIndex}`}
+          placeholder={input.type}
+          value={methodInputValues[inputIndex] || ''}
+          onChange={(e) => handleInputChange(inputIndex.toString(), e.target.value)}
+        />
+      );
     }
   };
 
@@ -318,23 +636,36 @@ const SamplePage = () => {
               onInputChange={handleInputChange}
               onEncodeMethodCall={handleEncodeMethodCall}
               getWritableMethods={getWritableMethods}
+              renderMethodInput={renderMethodInput}
             />
 
             {txHash && (
               <Alert color="blue">
                 <Stack gap="xs">
-                  <Text fw={500}>トランザクションハッシュ:</Text>
+                  <Text fw={500}>Transaction Hash:</Text>
                   <Code block>{txHash}</Code>
-                  <Anchor
-                    href={getExplorerUrl(txHash, chainId || 1)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <Group gap={5}>
-                      <Text>ブロックエクスプローラーで確認</Text>
-                      <IconExternalLink size={14} />
-                    </Group>
-                  </Anchor>
+                  <Group justify="space-between">
+                    {shouldShowExplorer(chainId || 1) && (
+                      <Anchor
+                        href={getExplorerUrl(txHash, chainId || 1)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Group gap={5}>
+                          <Text>View on Block Explorer</Text>
+                          <IconExternalLink size={14} />
+                        </Group>
+                      </Anchor>
+                    )}
+                    <Button
+                      variant="light"
+                      size="xs"
+                      onClick={handleShowReceipt}
+                      loading={isLoadingReceipt}
+                    >
+                      View Transaction Receipt
+                    </Button>
+                  </Group>
                 </Stack>
               </Alert>
             )}
@@ -359,12 +690,25 @@ const SamplePage = () => {
         <Modal
           opened={showTxJson}
           onClose={() => setShowTxJson(false)}
-          title="トランザクションJSON"
+          title="Transaction JSON"
           size="lg"
         >
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
             {txJson}
           </pre>
+        </Modal>
+
+        <Modal
+          opened={showTxReceipt}
+          onClose={() => setShowTxReceipt(false)}
+          title="Transaction Receipt"
+          size="lg"
+        >
+          <Box>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {JSON.stringify(txReceipt, null, 2)}
+            </pre>
+          </Box>
         </Modal>
       </Stack>
     </Container>

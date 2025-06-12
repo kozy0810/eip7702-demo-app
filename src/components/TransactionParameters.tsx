@@ -35,6 +35,7 @@ interface TransactionParametersProps {
   onInputChange: (index: string, value: string) => void;
   onEncodeMethodCall: () => void;
   getWritableMethods: () => AbiItem[];
+  renderMethodInput: (input: MethodInput, index: number) => React.ReactNode;
 }
 
 // 定義済みコントラクトの型
@@ -68,7 +69,8 @@ export const TransactionParameters: React.FC<TransactionParametersProps> = ({
   onMethodSelect,
   onInputChange,
   onEncodeMethodCall,
-  getWritableMethods
+  getWritableMethods,
+  renderMethodInput
 }) => {
   const [showTxParams, setShowTxParams] = React.useState(false);
   const [showGasParams, setShowGasParams] = React.useState(false);
@@ -229,35 +231,7 @@ export const TransactionParameters: React.FC<TransactionParametersProps> = ({
                       <Stack gap="sm">
                         {methodInputs.map((input, index) => (
                           <Box key={index}>
-                            {input.components ? (
-                              <Stack gap="sm">
-                                <Text fw={500} c="indigo">{input.name} (tuple)</Text>
-                                {input.components.map((component, compIndex) => (
-                                  <TextInput
-                                    key={compIndex}
-                                    label={`${component.name} (${component.type})`}
-                                    placeholder={
-                                      component.type.endsWith('[]') 
-                                        ? `配列形式で入力 (例: ${component.type === 'address[]' ? '0x1234...5678,0x8765...4321' : '1,2,3'})`
-                                        : `Enter ${component.type} value`
-                                    }
-                                    value={methodInputValues[`${index}-${compIndex}`] || ''}
-                                    onChange={(e) => onInputChange(`${index}-${compIndex}`, e.target.value)}
-                                  />
-                                ))}
-                              </Stack>
-                            ) : (
-                              <TextInput
-                                label={`${input.name} (${input.type})`}
-                                placeholder={
-                                  input.type.endsWith('[]') 
-                                    ? `配列形式で入力 (例: ${input.type === 'address[]' ? '0x1234...5678,0x8765...4321' : '1,2,3'})`
-                                    : `Enter ${input.type} value`
-                                }
-                                value={methodInputValues[index] || ''}
-                                onChange={(e) => onInputChange(index.toString(), e.target.value)}
-                              />
-                            )}
+                            {renderMethodInput(input, index)}
                           </Box>
                         ))}
                       </Stack>
