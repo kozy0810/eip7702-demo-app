@@ -16,7 +16,7 @@ interface TransactionParametersProps {
   selectedMethod: string;
   methodInputs: MethodInput[];
   abiError: string;
-  methodInputValues: Record<number, string>;
+  methodInputValues: Record<string, string>;
   authorizations: Array<{
     contractAddress: string;
     nonce: string;
@@ -32,7 +32,7 @@ interface TransactionParametersProps {
   onAbiUpload: (file: File | null) => void;
   onAbiTextInput: (value: string) => void;
   onMethodSelect: (value: string | null) => void;
-  onInputChange: (index: number, value: string) => void;
+  onInputChange: (index: string, value: string) => void;
   onEncodeMethodCall: () => void;
   getWritableMethods: () => AbiItem[];
 }
@@ -228,17 +228,37 @@ export const TransactionParameters: React.FC<TransactionParametersProps> = ({
                       <Text fw={500} c="indigo" mb="sm">Method Parameters</Text>
                       <Stack gap="sm">
                         {methodInputs.map((input, index) => (
-                          <TextInput
-                            key={index}
-                            label={`${input.name} (${input.type})`}
-                            placeholder={
-                              input.type.endsWith('[]') 
-                                ? `配列形式で入力 (例: ${input.type === 'address[]' ? '0x1234...5678,0x8765...4321' : '1,2,3'})`
-                                : `Enter ${input.type} value`
-                            }
-                            value={methodInputValues[index] || ''}
-                            onChange={(e) => onInputChange(index, e.target.value)}
-                          />
+                          <Box key={index}>
+                            {input.components ? (
+                              <Stack gap="sm">
+                                <Text fw={500} c="indigo">{input.name} (tuple)</Text>
+                                {input.components.map((component, compIndex) => (
+                                  <TextInput
+                                    key={compIndex}
+                                    label={`${component.name} (${component.type})`}
+                                    placeholder={
+                                      component.type.endsWith('[]') 
+                                        ? `配列形式で入力 (例: ${component.type === 'address[]' ? '0x1234...5678,0x8765...4321' : '1,2,3'})`
+                                        : `Enter ${component.type} value`
+                                    }
+                                    value={methodInputValues[`${index}-${compIndex}`] || ''}
+                                    onChange={(e) => onInputChange(`${index}-${compIndex}`, e.target.value)}
+                                  />
+                                ))}
+                              </Stack>
+                            ) : (
+                              <TextInput
+                                label={`${input.name} (${input.type})`}
+                                placeholder={
+                                  input.type.endsWith('[]') 
+                                    ? `配列形式で入力 (例: ${input.type === 'address[]' ? '0x1234...5678,0x8765...4321' : '1,2,3'})`
+                                    : `Enter ${input.type} value`
+                                }
+                                value={methodInputValues[index] || ''}
+                                onChange={(e) => onInputChange(index.toString(), e.target.value)}
+                              />
+                            )}
+                          </Box>
                         ))}
                       </Stack>
                       <Group justify="flex-end" mt="md">

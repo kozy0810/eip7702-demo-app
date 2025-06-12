@@ -8,6 +8,11 @@ export interface PredefinedContract {
 
 export const PREDEFINED_CONTRACTS: PredefinedContract[] = [
   {
+    name: "Simple",
+    address: "0x03255cf9CDB7E9fE21418B34Db3B4718B639c9Ee",
+    abi: [{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":false,"internalType":"uint256","name":"value","type":"uint256"},{"indexed":false,"internalType":"bytes","name":"data","type":"bytes"}],"name":"Executed","type":"event"},{"inputs":[{"components":[{"internalType":"bytes","name":"data","type":"bytes"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"value","type":"uint256"}],"internalType":"struct SimpleDelegateContract.Call[]","name":"calls","type":"tuple[]"}],"name":"execute","outputs":[],"stateMutability":"payable","type":"function"},{"stateMutability":"payable","type":"receive"}]
+  },
+  {
     name: 'ERC20 (Interface)',
     address: '0x0000000000000000000000000000000000000000',
     abi: [

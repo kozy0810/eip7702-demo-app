@@ -3,6 +3,7 @@ export interface MethodInput {
   type: string;
   internalType?: string;
   indexed?: boolean;
+  components?: MethodInput[];
 }
 
 export interface AbiItem {
